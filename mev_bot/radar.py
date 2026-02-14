@@ -66,11 +66,25 @@ def fire_aave_liquidation(victim, debt_raw):
     except Exception as e:
         print(f"Simulation failed: {e}")
 
-# Anti-Spam Logic
-LAST_NOTIFIED = {} # {address: (timestamp, hf)}
+# Anti-Spam (Persistent)
+NOTIF_FILE = os.path.join(BASE_DIR, "notifications.json")
+
+def load_notifs():
+    if os.path.exists(NOTIF_FILE):
+        try:
+            with open(NOTIF_FILE, "r") as f: return json.load(f)
+        except: return {}
+    return {}
+
+def save_notifs(data):
+    try:
+        with open(NOTIF_FILE, "w") as f: json.dump(data, f)
+    except: pass
 
 def scan():
-    # 1. Refresh Targets from targets.txt
+    last_notified = load_notifs()
+    now = time.time()
+    
     targets = set()
     if os.path.exists(TARGET_FILE):
         with open(TARGET_FILE, "r") as f:
@@ -80,7 +94,6 @@ def scan():
     print(f"[{time.strftime('%H:%M:%S')}] Monitoring {len(targets)} active whales...")
     
     count = 0
-    now = time.time()
     for user in list(targets):
         if count > 150: break
         try:
@@ -93,15 +106,18 @@ def scan():
                 if hf < 1.0 and debt_usd > 500: 
                     fire_aave_liquidation(user, d[1])
                 elif hf < 1.15 and debt_usd > 500:
-                    # Check if we should notify
-                    last_time, last_hf = LAST_NOTIFIED.get(user, (0, 99))
-                    # Notify only if: 1. It's been > 1 hour OR 2. HF dropped significantly since last alert
-                    if (now - last_time > 3600) or (hf < last_hf - 0.02):
+                    # HEAVY COOLDOWN: 12 Hours
+                    last_time, last_hf = last_notified.get(user, [0, 99])
+                    
+                    # Only notify if > 12 hours OR catastrophic drop (< 1.03)
+                    if (now - last_time > 43200) or (hf < 1.03 and last_hf > 1.03):
                         print(f"  💀 [DANGER] Whale {user[:10]} | HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
                         send_tg(f"💀 DANGER: Whale {user[:10]} HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
-                        LAST_NOTIFIED[user] = (now, hf)
+                        last_notified[user] = [now, hf]
+                        save_notifs(last_notified)
                 elif hf < 1.3:
-                    print(f"  👁️ [WATCH] Whale {user[:10]} | HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
+                    # Console watch only
+                    pass
             count += 1
         except: continue
 
