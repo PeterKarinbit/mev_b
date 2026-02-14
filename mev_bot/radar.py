@@ -66,6 +66,9 @@ def fire_aave_liquidation(victim, debt_raw):
     except Exception as e:
         print(f"Simulation failed: {e}")
 
+# Anti-Spam Logic
+LAST_NOTIFIED = {} # {address: (timestamp, hf)}
+
 def scan():
     # 1. Refresh Targets from targets.txt
     targets = set()
@@ -73,30 +76,30 @@ def scan():
         with open(TARGET_FILE, "r") as f:
             targets = set([line.strip() for line in f if line.strip()])
     
-    if len(targets) < 50:
-        print("Target list small. Refreshing via logs might be needed.")
-    
     aave = w3.eth.contract(address=AAVE_POOL, abi=AAVE_ABI)
-    
     print(f"[{time.strftime('%H:%M:%S')}] Monitoring {len(targets)} active whales...")
     
-    # Check top users for speed (prioritize active borrowers)
     count = 0
+    now = time.time()
     for user in list(targets):
-        if count > 150: break # Only check 150 at a time to stay within RPC limits
+        if count > 150: break
         try:
             user = Web3.to_checksum_address(user)
-            # Aave Real-Time Data Fetch
             d = aave.functions.getUserAccountData(user).call()
             hf = d[5] / 1e18
-            debt_usd = d[1] / 1e8 # Aave Base units (8 decimals)
+            debt_usd = d[1] / 1e8
             
-            if debt_usd > 100: # Only care about debt > $100
+            if debt_usd > 100:
                 if hf < 1.0 and debt_usd > 500: 
                     fire_aave_liquidation(user, d[1])
                 elif hf < 1.15 and debt_usd > 500:
-                    print(f"  💀 [DANGER] Whale {user[:10]} | HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
-                    send_tg(f"💀 DANGER: Whale {user[:10]} HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
+                    # Check if we should notify
+                    last_time, last_hf = LAST_NOTIFIED.get(user, (0, 99))
+                    # Notify only if: 1. It's been > 1 hour OR 2. HF dropped significantly since last alert
+                    if (now - last_time > 3600) or (hf < last_hf - 0.02):
+                        print(f"  💀 [DANGER] Whale {user[:10]} | HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
+                        send_tg(f"💀 DANGER: Whale {user[:10]} HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
+                        LAST_NOTIFIED[user] = (now, hf)
                 elif hf < 1.3:
                     print(f"  👁️ [WATCH] Whale {user[:10]} | HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
             count += 1
@@ -106,4 +109,4 @@ if __name__ == "__main__":
     print(__doc__)
     while True:
         scan()
-        time.sleep(15) 
+        time.sleep(15)
