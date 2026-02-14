@@ -30,13 +30,30 @@ TOKENS = {
     "DEGEN": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
     "BRETT": "0x532f27101965dd16442E59d40670FaF5eBB142E4",
     "VIRTUAL": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b",
+    "SPAWN": "0x5f074d084c7a6598c1143c75ca77a3465941656c", # Verified from DexScreener
+    "MOLTX": "0x5608b0d46654876b5c2c4aa0223592237083049b", # Verified
+    "H1DR4": "0x9812eb121021bc5630327f426284fadd360824b2", # Virtuals Pair
+    "TIBBIR": "0x2e864070a2f4da8e1e70e9a502f615364132c34f" # Ribbita
 }
 
 RESERVES_ABI = [{"inputs":[],"name":"getReserves","outputs":[{"name":"","type":"uint112"},{"name":"","type":"uint112"},{"name":"","type":"uint32"}],"type":"function"},{"inputs":[],"name":"token0","outputs":[{"name":"","type":"address"}],"type":"function"}]
 V3_POOL_ABI = [{"inputs":[],"name":"slot0","outputs":[{"name":"sqrtPriceX96","type":"uint160"},{"name":"tick","type":"int24"},{"name":"","type":"uint16"},{"name":"","type":"uint16"},{"name":"","type":"uint16"},{"name":"","type":"uint8"},{"name":"","type":"bool"}],"type":"function"}]
 EXEC_ABI = [{"inputs":[{"name":"asset","type":"address"},{"name":"amount","type":"uint256"},{"name":"params","type":"bytes"}],"name":"execute","outputs":[],"type":"function"}]
 
-DEC_CACHE = {"0x4200000000000000000000000000000000000006": 18, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": 6}
+DEC_CACHE = {
+    "0x4200000000000000000000000000000000000006": 18, 
+    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": 6,
+    "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b": 18 # VIRTUAL
+}
+
+# Sync w3 instance
+w3_sync = Web3(Web3.HTTPProvider(RPC_URL))
+# Add new pairs to the scan logic
+PAIRS_TO_SCAN = [
+    ("USDC", "WETH"), ("WETH", "DEGEN"), ("WETH", "BRETT"),
+    ("WETH", "SPAWN"), ("WETH", "MOLTX"), ("WETH", "TIBBIR"),
+    ("VIRTUAL", "H1DR4") # Special Virtuals arb
+]
 
 # Sync w3 instance
 w3_sync = Web3(Web3.HTTPProvider(RPC_URL))
@@ -106,11 +123,10 @@ async def hunt():
                 except: pass
                 last_heartbeat = time.time()
 
-            # We run the sync checks in a thread to keep the loop non-blocking
             loop = asyncio.get_running_loop()
             tasks = []
             
-            for pair in [("USDC", "WETH"), ("WETH", "DEGEN"), ("WETH", "BRETT")]:
+            for pair in PAIRS_TO_SCAN:
                 # Run price check in thread (SILENTLY)
                 a1, a2 = TOKENS[pair[0]], TOKENS[pair[1]]
                 aero, uni = await loop.run_in_executor(None, get_prices_sync, a1, a2) # No prints inside
