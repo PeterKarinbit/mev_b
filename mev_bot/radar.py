@@ -67,38 +67,43 @@ def fire_aave_liquidation(victim, debt_raw):
         print(f"Simulation failed: {e}")
 
 def scan():
+    # 1. Refresh Targets from targets.txt
     targets = set()
     if os.path.exists(TARGET_FILE):
         with open(TARGET_FILE, "r") as f:
             targets = set([line.strip() for line in f if line.strip()])
     
+    if len(targets) < 50:
+        print("Target list small. Refreshing via logs might be needed.")
+    
     aave = w3.eth.contract(address=AAVE_POOL, abi=AAVE_ABI)
-    moon = w3.eth.contract(address=MOON_COMP, abi=MOON_ABI)
     
-    print(f"[{time.strftime('%H:%M:%S')}] Monitoring {len(targets)} wallets...")
+    print(f"[{time.strftime('%H:%M:%S')}] Monitoring {len(targets)} active whales...")
     
-    for user in targets:
+    # Check top users for speed (prioritize active borrowers)
+    count = 0
+    for user in list(targets):
+        if count > 150: break # Only check 150 at a time to stay within RPC limits
         try:
             user = Web3.to_checksum_address(user)
-            # Aave Check
+            # Aave Real-Time Data Fetch
             d = aave.functions.getUserAccountData(user).call()
             hf = d[5] / 1e18
-            debt_usd = d[1] / 1e8 # Aave Base units (8 decimals for USD)
+            debt_usd = d[1] / 1e8 # Aave Base units (8 decimals)
             
-            if hf < 1.0 and debt_usd > 50: # Only liq if debt > $50
-                fire_aave_liquidation(user, d[1])
-            elif hf < 1.05 and debt_usd > 50:
-                print(f"  [At Risk] Aave User: {user[:14]} HF: {hf:.4f} Debt: ${debt_usd:.2f}")
-                send_tg(f"⚠️ AT RISK: Whale {user[:10]} HF: {hf:.4f} | Debt: ${debt_usd:.2f}")
-            
-            # Moonwell Check (Message only for now)
-            err, liq, short = moon.functions.getAccountLiquidity(user).call()
-            if err == 0 and short > 0:
-                send_tg(f"MOONWELL SHORTFALL DETECTED!\nUser: {user[:14]}\nAmt: ${short/1e18:.2f}")
+            if debt_usd > 100: # Only care about debt > $100
+                if hf < 1.0 and debt_usd > 500: 
+                    fire_aave_liquidation(user, d[1])
+                elif hf < 1.15 and debt_usd > 500:
+                    print(f"  💀 [DANGER] Whale {user[:10]} | HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
+                    send_tg(f"💀 DANGER: Whale {user[:10]} HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
+                elif hf < 1.3:
+                    print(f"  👁️ [WATCH] Whale {user[:10]} | HF: {hf:.4f} | Debt: ${debt_usd:,.2f}")
+            count += 1
         except: continue
 
 if __name__ == "__main__":
     print(__doc__)
     while True:
         scan()
-        time.sleep(12)
+        time.sleep(15) 
