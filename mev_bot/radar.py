@@ -17,7 +17,7 @@ BOT_ADDRESS      = Web3.to_checksum_address(os.getenv("BOT_ADDRESS"))
 CONTRACT_ADDRESS = Web3.to_checksum_address(os.getenv("FLASH_ARB_CONTRACT"))
 TG_TOKEN         = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT          = os.getenv("TELEGRAM_CHAT_ID")
-RPC_URL          = "https://mainnet.base.org"
+RPC_URL          = "https://base-mainnet.g.alchemy.com/v2/USbVaOTSKlqazrRw7rjg2"
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 # Assets
@@ -83,10 +83,13 @@ def scan():
             # Aave Check
             d = aave.functions.getUserAccountData(user).call()
             hf = d[5] / 1e18
-            if hf < 1.0 and d[1] > 0:
+            debt_usd = d[1] / 1e8 # Aave Base units (8 decimals for USD)
+            
+            if hf < 1.0 and debt_usd > 50: # Only liq if debt > $50
                 fire_aave_liquidation(user, d[1])
-            elif hf < 1.05 and d[1] > 0:
-                print(f"  [At Risk] Aave User: {user[:14]} HF: {hf:.4f}")
+            elif hf < 1.05 and debt_usd > 50:
+                print(f"  [At Risk] Aave User: {user[:14]} HF: {hf:.4f} Debt: ${debt_usd:.2f}")
+                send_tg(f"⚠️ AT RISK: Whale {user[:10]} HF: {hf:.4f} | Debt: ${debt_usd:.2f}")
             
             # Moonwell Check (Message only for now)
             err, liq, short = moon.functions.getAccountLiquidity(user).call()

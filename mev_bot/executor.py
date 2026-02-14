@@ -18,6 +18,15 @@ CONTRACT_ADDRESS = Web3.to_checksum_address(os.getenv("FLASH_ARB_CONTRACT"))
 TG_TOKEN         = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT          = os.getenv("TELEGRAM_CHAT_ID")
 
+# ───────────────────────── DYNAMIC CONFIG ─────────────────────────
+MIN_GAP_PERCENT = 0.8  # Default
+BASE_PRIORITY_FEE = 0.05 # Gwei
+MAX_PRIORITY_FEE = 2.0   # Gwei (for $10+ profit)
+
+# Volatility Tracking
+WETH_PRICE_HISTORY = [] # Stores (timestamp, price)
+VOLATILITY_MODE = False
+
 # ───────────────────────── STABLE RPC ROTATION ─────────────────────────
 # Using stable, free-tier primary nodes
 RPC_URLS = [
@@ -104,17 +113,33 @@ def get_uni_price(token_a, token_b, w3):
         except: continue
     return None, None
 
-def fire_trade(w3, n1, n2, a1, raw, a2, f, buyAero, gap):
-    contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=EXEC_ABI)
-    params = eth_abi.encode(['bool', 'address', 'uint24', 'bool', 'address'], [False, a2, f, buyAero, "0x0000000000000000000000000000000000000000"])
-    tx = contract.functions.execute(a1, raw, params).build_transaction({
-        'from': BOT_ADDRESS, 'nonce': w3.eth.get_transaction_count(BOT_ADDRESS), 'gas': 800000,
-        'maxFeePerGas': int(w3.eth.gas_price * 1.5), 'maxPriorityFeePerGas': w3.to_wei('0.1', 'gwei')
-    })
+async def check_volatility(w3):
+    global MIN_GAP_PERCENT, VOLATILITY_MODE
     try:
-        w3.eth.call(tx)
-        h = w3.eth.send_raw_transaction(w3.eth.account.sign_transaction(tx, PRIVATE_KEY).raw_transaction)
-        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_CHAT, "text": f"🚀 STRIKE: {n1}/{n2} Gap: {gap:.2f}%"})
+        current_price = get_aero_price(TOKENS["WETH"], TOKENS["USDC"], w3)
+        if not current_price: return
+        now = time.time()
+        WETH_PRICE_HISTORY.append((now, current_price))
+        
+        # Keep only last 1 hour of history
+        one_hour_ago = now - 3600
+        while WETH_PRICE_HISTORY and WETH_PRICE_HISTORY[0][0] < one_hour_ago:
+            WETH_PRICE_HISTORY.pop(0)
+
+        if len(WETH_PRICE_HISTORY) > 10:
+            old_price = WETH_PRICE_HISTORY[0][1]
+            change = abs(current_price - old_price) / old_price * 100
+            
+            if change > 3.0: # 3% move in 1 hour = Aggressive Mode
+                if not VOLATILITY_MODE:
+                    requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_CHAT, "text": f"🔥 VOLATILITY DETECTED: {change:.2f}% move. Switching to AGGRESSIVE MODE (Gap: 0.5%)"})
+                MIN_GAP_PERCENT = 0.5
+                VOLATILITY_MODE = True
+            else:
+                if VOLATILITY_MODE:
+                    requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_CHAT, "text": "🛡️ Market Stabilized. Returning to SHIELD MODE (Gap: 0.8%)"})
+                MIN_GAP_PERCENT = 0.8
+                VOLATILITY_MODE = False
     except: pass
 
 async def scan(w3):
@@ -122,21 +147,46 @@ async def scan(w3):
     for n1, n2, diff in PAIRS:
         addr1, addr2 = TOKENS[n1], TOKENS[n2]
         async def check(n1, n2, a1, a2, diff):
-            aero, uni_data = get_aero_price(a1, a2, w3), get_uni_price(a1, a2, w3)
-            u, f = uni_data
-            if aero and u:
-                gap = (abs(aero - u) / min(aero, u)) * 100
-                if gap > 0.8:
-                    amt = 500 if diff == "HIGH" else 50
-                    fire_trade(w3, n1, n2, a1, amt * 10**get_dec(a1, w3), a2, f, aero < u, gap)
+            try:
+                aero, uni_data = get_aero_price(a1, a2, w3), get_uni_price(a1, a2, w3)
+                u, f = uni_data
+                if aero and u:
+                    gap = (abs(aero - u) / min(aero, u)) * 100
+                    if gap > MIN_GAP_PERCENT:
+                        amt = 500 if diff == "HIGH" else 50
+                        fire_trade(w3, n1, n2, a1, amt * 10**get_dec(a1, w3), a2, f, aero < u, gap)
+            except: pass
         tasks.append(check(n1, n2, addr1, addr2, diff))
     await asyncio.gather(*tasks)
 
+def fire_trade(w3, n1, n2, a1, raw, a2, f, buyAero, gap):
+    contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=EXEC_ABI)
+    params = eth_abi.encode(['bool', 'address', 'uint24', 'bool', 'address'], [False, a2, f, buyAero, "0x0000000000000000000000000000000000000000"])
+    
+    # DYNAMIC PRIORITY FEE (Nitro)
+    # Higher gap = Higher probability of profit = Higher priority 'tip'
+    priority_tip = BASE_PRIORITY_FEE
+    if gap > 2.0: priority_tip = 0.5
+    if gap > 5.0: priority_tip = 1.5 # Go full aggro for big gaps
+    
+    tx = contract.functions.execute(a1, raw, params).build_transaction({
+        'from': BOT_ADDRESS, 'nonce': w3.eth.get_transaction_count(BOT_ADDRESS), 'gas': 800000,
+        'maxFeePerGas': int(w3.eth.gas_price * 1.5), 
+        'maxPriorityFeePerGas': w3.to_wei(str(priority_tip), 'gwei')
+    })
+    try:
+        w3.eth.call(tx)
+        h = w3.eth.send_raw_transaction(w3.eth.account.sign_transaction(tx, PRIVATE_KEY).raw_transaction)
+        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_CHAT, "text": f"🚀 STRIKE: {n1}/{n2} Gap: {gap:.2f}% | Tip: {priority_tip} Gwei"})
+    except: pass
+
 async def main():
-    print("SHIELD MODE ACTIVE: High Reliability Multi-RPC Enabled.")
+    print("SHIELD MODE ACTIVE: Volatility Sensors & Auto-Nitro Enabled.")
     while True:
         w = get_w3()
-        if w: await scan(w)
+        if w: 
+            await check_volatility(w) # Update sensors
+            await scan(w) # Target hunt
         await asyncio.sleep(0.1)
 
 if __name__ == "__main__":
