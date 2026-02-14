@@ -149,9 +149,16 @@ def attack_sync(a1, a2, gap, buysAero):
             w3_sync.eth.call(tx) 
             signed = w3_sync.eth.account.sign_transaction(tx, PRIVATE_KEY)
             h = w3_sync.eth.send_raw_transaction(signed.raw_transaction)
-            msg = f"🦍 GORILLA STRIKE: Gap {gap:.2f}% | Flash: ${amt} | Tx: {h.hex()[:10]}..."
+            
+            # Update Stats
+            global TOTAL_PROFIT
+            estimated_profit = amt * (gap/100) # Rough estimate
+            TOTAL_PROFIT += estimated_profit
+            
+            msg = f"🚀 STRIKE: {a1}/{a2} Gap: {gap:.2f}% | Est. Profit: ${estimated_profit:.2f}"
             print(msg)
-            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_CHAT, "text": msg})
+            try: bot.send_message(TG_CHAT, msg)
+            except: requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": TG_CHAT, "text": msg})
         except: pass
     except: pass
 
