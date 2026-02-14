@@ -46,6 +46,53 @@ DEC_CACHE = {
     "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b": 18 # VIRTUAL
 }
 
+import telebot
+from telebot import types
+
+# Initialize TeleBot
+try:
+    bot = telebot.TeleBot(TG_TOKEN)
+except:
+    print("❌ Telegram Bot Token Invalid")
+    bot = None
+
+# Stats Global
+TOTAL_PROFIT = 0.0
+LAST_PROFIT_TIME = None
+START_TIME = time.time()
+
+@bot.message_handler(commands=['status'])
+def send_status(message):
+    uptime = int(time.time() - START_TIME)
+    h, m = divmod(uptime, 3600)
+    m, s = divmod(m, 60)
+    msg = f"""
+🦍 **GORILLA STATUS: ONLINE**
+⏱️ Uptime: {h}h {m}m {s}s
+🎯 Targets: {len(PAIRS_TO_SCAN)} Pairs
+⚡ Mode: War Mode (Hybrid Threaded)
+💰 Total Profit: ${TOTAL_PROFIT:.2f}
+    """
+    bot.reply_to(message, msg, parse_mode="Markdown")
+
+@bot.message_handler(commands=['balance'])
+def send_balance(message):
+    try:
+        eth = w3_sync.eth.get_balance(BOT_ADDRESS) / 10**18
+        msg = f"💳 **WALLET BALANCE:**\nETH: {eth:.5f}"
+        bot.reply_to(message, msg, parse_mode="Markdown")
+    except:
+        bot.reply_to(message, "❌ Error checking balance.")
+
+def start_telegram_listener():
+    if bot:
+        print("🎧 Telegram Listener Active...")
+        bot.infinity_polling()
+
+# Launch Listener Thread
+import threading
+threading.Thread(target=start_telegram_listener, daemon=True).start()
+
 # Sync w3 instance
 w3_sync = Web3(Web3.HTTPProvider(RPC_URL))
 # Add new pairs to the scan logic
