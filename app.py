@@ -1,28 +1,36 @@
 from flask import Flask
+import subprocess
 import threading
 import os
-import subprocess
 import time
 
 app = Flask(__name__)
 
+def run_script(script_name):
+    """Run a Python script in the background."""
+    print(f"🚀 Starting {script_name}...")
+    subprocess.Popen(["python3", script_name])
+
+# Start MEV Bots in separate threads to not block Flask
+def start_bots():
+    time.sleep(5)  # Wait for Flask to stabilize
+    run_script("mev_bot/radar.py")
+    run_script("mev_bot/gorilla_bot.py")
+
+# Launch the bots when the app starts
+threading.Thread(target=start_bots, daemon=True).start()
+
 @app.route('/')
 def home():
-    return "🚀 **Linkivo MEV Bot** is actively hunting on Base!<br>Remote control is enabled via Telegram. 🏹💀⚓️"
-
-def run_bots():
-    # Wait a few seconds for the environment to settle
-    time.sleep(5)
-    print("Starting MEV Engine components...")
-    # These start the bots in the background on Render's server
-    subprocess.Popen(["python3", "mev_bot/executor.py"])
-    subprocess.Popen(["python3", "mev_bot/radar.py"])
-    subprocess.Popen(["python3", "mev_bot/listener.py"])
-
-# Start bots IMMEDIATELY upon deployment
-threading.Thread(target=run_bots, daemon=True).start()
+    return """
+    <h1>🦍 Linkivo MEV System Active</h1>
+    <ul>
+        <li><b>Gorilla Bot:</b> HUNTING [Silent Mode]</li>
+        <li><b>Whale Radar:</b> SCANNING</li>
+        <li><b>Flash Engine:</b> ARMED ($2,000)</li>
+    </ul>
+    """
 
 if __name__ == "__main__":
-    # Render provides a PORT environment variable
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
