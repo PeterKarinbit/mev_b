@@ -118,7 +118,18 @@ async def handle_tg_commands():
         try:
             url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
             async with httpx.AsyncClient() as client:
-                resp = await client.get(url, params={"offset": last_update_id + 1, "timeout": 30})
+                resp = await client.get(url, params={"offset": last_update_id + 1, "timeout": 30}, timeout=40)
+                
+                if resp.status_code == 409:
+                    print("\n⚠️ TELEGRAM CONFLICT DETECTED!")
+                    print("Another instance (likely Render) is processing commands. Disabling local listener.\n")
+                    return # Exit the listener loop, let the other bot handle commands
+                
+                if resp.status_code != 200:
+                    print(f"\nTG Error {resp.status_code}: {resp.text}")
+                    await asyncio.sleep(10)
+                    continue
+
                 updates = resp.json().get("result", [])
                 for update in updates:
                     last_update_id = update["update_id"]
@@ -135,20 +146,19 @@ async def handle_tg_commands():
                         await send_tg(f"💰 <b>Wallet Balance:</b> {eth_bal:.6f} ETH\nAddress: <code>{account}</code>")
                     elif text == "/status":
                         targets_list = "\n".join([f"- {name}" for name in TARGETS.keys()])
-                        await send_tg(f"🟢 <b>Bot Status:</b> RUNNING\n<b>Network:</b> Base\n<b>Targets:</b>\n{targets_list}")
+                        await send_tg(f"🟢 <b>Bot Status:</b> RUNNING (Main)\n<b>Network:</b> Base\n<b>Targets:</b>\n{targets_list}")
                     elif text == "/report":
-                        # Simplistic report for now
-                        await send_tg("📊 <b>Daily Report:</b>\nMonitoring 5 pools.\nTotal attacks today: 0 (since restart)\nStatus: Healthy")
+                        await send_tg("📊 <b>Daily Report:</b>\nMonitoring 5 pools.\nStatus: Healthy & Hunting")
                     elif text == "/targets":
                         t_msg = "🎯 <b>Current Thresholds:</b>\n"
                         for name, data in TARGETS.items():
                             t_msg += f"- {name}: {data['threshold']}% ({data['loan_eth']} ETH)\n"
                         await send_tg(t_msg)
                     elif text == "/ping":
-                        await send_tg("🏓 Pong! Bot is alive.")
+                        await send_tg("🏓 Pong! Main Bot is alive.")
                         
         except Exception as e:
-            print(f"TG Polling Error: {e}")
+            pass
         await asyncio.sleep(2)
 
 def get_v3_price(pool_addr, is_token0):
@@ -230,22 +240,17 @@ async def check_token(name, data):
         await execute_flash(name, data, 2, abs(spread))
         await asyncio.sleep(5)
 
-async def mev_loop():
-    while True:
-        tasks = [check_token(name, data) for name, data in TARGETS.items()]
-        await asyncio.gather(*tasks)
-        await asyncio.sleep(0.01)
-
 async def main():
-    start_msg = "🚀 <b>SPEED-DEMON v6.6 ONLINE</b>\nBot monitoring Base with TG command support.\n\nTry <code>/balance</code>, <code>/status</code>, or <code>/targets</code>."
+    start_msg = "🚀 <b>SPEED-DEMON v6.7 ONLINE</b>\nBot reset successful. Monitoring Base.\nTry <code>/status</code> to confirm targets."
     print(start_msg.replace("<b>","").replace("</b>",""), flush=True)
     await send_tg(start_msg)
     
-    # Run both loops concurrently
-    await asyncio.gather(
-        mev_loop(),
-        handle_tg_commands()
-    )
+    while True:
+        tasks = [check_token(name, data) for name, data in TARGETS.items()]
+        # Run command listener alongside monitoring
+        tasks.append(handle_tg_commands())
+        await asyncio.gather(*tasks)
+        await asyncio.sleep(0.01)
 
 if __name__ == "__main__":
     asyncio.run(main())
