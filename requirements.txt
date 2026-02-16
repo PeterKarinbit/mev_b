@@ -5,3 +5,4 @@ flask
 eth-abi
 gunicorn
 pyTelegramBotAPI
+httpx
