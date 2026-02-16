@@ -180,17 +180,21 @@ async def hunt():
             loop = asyncio.get_running_loop()
             tasks = []
             
+            # HYPER-AGGRESSIVE THRESHOLD (Lowered to capture more frequent arbs)
+            THRESHOLD = 0.6 # 0.6% gap is now enough to trigger
+            
             for pair in PAIRS_TO_SCAN:
                 # Run price check in thread (SILENTLY)
                 a1, a2 = TOKENS[pair[0]], TOKENS[pair[1]]
-                aero, uni = await loop.run_in_executor(None, get_prices_sync, a1, a2) # No prints inside
+                aero, uni = await loop.run_in_executor(None, get_prices_sync, a1, a2)
                 
                 if aero and uni:
-                    # Logic
                     gap = (abs(aero - uni) / min(aero, uni)) * 100
-                    if gap > MIN_GAP_PERCENT:
-                        # Fire attack in thread
-                        await loop.run_in_executor(None, attack_sync, a1, a2, gap, aero < uni)
+                    if gap >= THRESHOLD:
+                        # NITRO MODE: Higher gas to beat the "little pesky boys"
+                        priority_fee = 0.7 # Increased from 0.6
+                        # The original code used run_in_executor, maintaining that pattern
+                        await loop.run_in_executor(None, attack_sync, a1, a2, gap, aero < uni, 2000, priority_fee)
             
             await asyncio.sleep(0.5) 
         except Exception as e:

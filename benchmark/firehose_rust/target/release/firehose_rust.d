@@ -1,0 +1,1 @@
+/home/peter-karingithi/Pictures/Linkivo/EPS32\ configuration/benchmark/firehose_rust/target/release/firehose_rust: /home/peter-karingithi/Pictures/Linkivo/EPS32\ configuration/benchmark/firehose_rust/src/main.rs

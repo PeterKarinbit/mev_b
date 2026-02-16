@@ -8,3 +8,9 @@ artifacts/
 cache/
 .DS_Store
 deploy_output.txt
+__pycache__/
+.vscode/
+diagnostic_results.json
+serper_*.json
+targets.txt
+nohup.out
