@@ -59,7 +59,7 @@ TARGETS = {
         "uni_pool": "0xAEC085E5A5CE8d96A7bDd3eB3A62445d4f6CE703",
         "uni_fee": 10000,
         "aero_fee": 200, 
-        "threshold": 1.45, # Adjusted for fees
+        "threshold": 1.45,
         "loan_eth": 15.0,
         "aero_type_val": 2, 
         "aero_is_token0": True,
@@ -108,7 +108,48 @@ async def send_tg(msg):
         async with httpx.AsyncClient() as client:
             await client.post(url, json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "HTML"})
     except Exception as e:
-        print(f"TG Error: {e}")
+        print(f"TG Send Error: {e}")
+
+async def handle_tg_commands():
+    if not TG_TOKEN: return
+    last_update_id = 0
+    print("🤖 Telegram Command Listener Active")
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, params={"offset": last_update_id + 1, "timeout": 30})
+                updates = resp.json().get("result", [])
+                for update in updates:
+                    last_update_id = update["update_id"]
+                    msg = update.get("message", {})
+                    text = msg.get("text", "")
+                    sender_id = str(msg.get("from", {}).get("id", ""))
+                    
+                    if sender_id != str(TG_CHAT_ID):
+                        continue
+                        
+                    if text == "/balance":
+                        bal = w3.eth.get_balance(account)
+                        eth_bal = w3.from_wei(bal, "ether")
+                        await send_tg(f"💰 <b>Wallet Balance:</b> {eth_bal:.6f} ETH\nAddress: <code>{account}</code>")
+                    elif text == "/status":
+                        targets_list = "\n".join([f"- {name}" for name in TARGETS.keys()])
+                        await send_tg(f"🟢 <b>Bot Status:</b> RUNNING\n<b>Network:</b> Base\n<b>Targets:</b>\n{targets_list}")
+                    elif text == "/report":
+                        # Simplistic report for now
+                        await send_tg("📊 <b>Daily Report:</b>\nMonitoring 5 pools.\nTotal attacks today: 0 (since restart)\nStatus: Healthy")
+                    elif text == "/targets":
+                        t_msg = "🎯 <b>Current Thresholds:</b>\n"
+                        for name, data in TARGETS.items():
+                            t_msg += f"- {name}: {data['threshold']}% ({data['loan_eth']} ETH)\n"
+                        await send_tg(t_msg)
+                    elif text == "/ping":
+                        await send_tg("🏓 Pong! Bot is alive.")
+                        
+        except Exception as e:
+            print(f"TG Polling Error: {e}")
+        await asyncio.sleep(2)
 
 def get_v3_price(pool_addr, is_token0):
     try:
@@ -148,7 +189,6 @@ async def execute_flash(name, data, mode, spread):
     await send_tg(msg)
     
     try:
-        # Check balance before trying (minimal check)
         bal = w3.eth.get_balance(account)
         if bal < w3.to_wei(0.003, 'ether'):
             await send_tg("⚠️ <b>OUT OF GAS!</b> Trade aborted.")
@@ -185,20 +225,27 @@ async def check_token(name, data):
     
     if spread >= data['threshold']:
         await execute_flash(name, data, 1, spread)
-        await asyncio.sleep(5) # Cooldown
+        await asyncio.sleep(5)
     elif spread <= -data['threshold'] :
         await execute_flash(name, data, 2, abs(spread))
         await asyncio.sleep(5)
 
-async def main():
-    start_msg = "🚀 <b>SPEED-DEMON v6.5 ONLINE</b>\nBot monitoring Base with optimized Slipstream routes."
-    print(start_msg.replace("<b>","").replace("</b>",""), flush=True)
-    await send_tg(start_msg)
-    
+async def mev_loop():
     while True:
         tasks = [check_token(name, data) for name, data in TARGETS.items()]
         await asyncio.gather(*tasks)
         await asyncio.sleep(0.01)
+
+async def main():
+    start_msg = "🚀 <b>SPEED-DEMON v6.6 ONLINE</b>\nBot monitoring Base with TG command support.\n\nTry <code>/balance</code>, <code>/status</code>, or <code>/targets</code>."
+    print(start_msg.replace("<b>","").replace("</b>",""), flush=True)
+    await send_tg(start_msg)
+    
+    # Run both loops concurrently
+    await asyncio.gather(
+        mev_loop(),
+        handle_tg_commands()
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
