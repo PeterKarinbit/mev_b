@@ -245,10 +245,11 @@ async def main():
     print(start_msg.replace("<b>","").replace("</b>",""), flush=True)
     await send_tg(start_msg)
     
+    # Start TG listener in background
+    asyncio.create_task(handle_tg_commands())
+    
     while True:
         tasks = [check_token(name, data) for name, data in TARGETS.items()]
-        # Run command listener alongside monitoring
-        tasks.append(handle_tg_commands())
         await asyncio.gather(*tasks)
         await asyncio.sleep(0.01)
 
